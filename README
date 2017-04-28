@@ -1,0 +1,98 @@
+Our project implements the well-known PageRank algorithm used by Google Search to rank web-pages in accordance to their “importance.” Deviating from common implementations and projects that rely on pre-existing XML sitemaps (such as those found via Stanford’s SNAP project), we developed an Objective-C program running complement to the PageRank algorithm to create our own XML sitemaps. Our project focuses on a sitemap and PageRank of Roblox.com, which hosts a popular online kid-friendly building and programming game.
+Our java program is based on the opensource project on GitHub originally developed by Abhijeet Nayak in 2014 with the purpose of ranking Wikipedia pages. For more information about his initial project, follow the link: https://github.com/abnayak/WikipediaPagerank.
+The framework of our project is implemented using Hadoop 2.7.3. And contains a package called ‘src’ that contains all the initial java classes necessary to run out algorithm. Our main class PageeRank.java handles all the MapReduce jobs to calculate the page rank of all the pages in the dataset. The main class implements the program by running various classes designed to handle different tasks. The divided classes include:
+  1.	XmlInputFormat.java
+  2.	OutlinkMapperStage1.java, OutlinkMapperStage2.java
+  3.	OutlinkMapperStage2.java, OutlinkMapperStage2.java
+  4.	LinkCountMapper.java, LinkCountReducer.java
+  5.	RankCalculateMapperStage1.java, RankCalculateReducerStage1.java, RankCalculateMapper.java
+  6.	SortMapper.java, SortReducer.java
+After these classes are executed, we are left with an output file containing a ranked list of all the list in order from highest to lowest page rank. We dive into each component of our algorithm and implementation in the next section, methods.
+
+1.	Sitemap Generation:
+
+Our project begins by implementing an Objective-C program (created specifically for our project) that inputs a .txt file containing a list of links to be web-crawled, and exports an XML sitemap in the correct format to be read by our PageRank .java program. We can also use the trial-version of a software called ‘Web Content Extractor’ to perform the similar web-crawling task. The program will export a maximum of 150 pages as a free-trial. The Page Crawl settings must be changed to output the HTML contents of the pages and the crawl should start at the home address of your domain (e.g. https://www.roblox.com). All web-crawling software will work if they export an XML file with the following format:
+
+  <page> <title> [A] </title> <text> HTML BODY </text> </page>
+  <page> <title> [B] >/title> <text> HTML BODY </text> </page>
+  …
+  <page> <title> [N] >/title> <text> HTML BODY </text> </page>
+
+We also noted that not all of the webpages we crawled had a unique title. Many had generic titles such as “Play Roblox.” In order to prevent later confusion when reading the sorted list (which prints the contents of <title></title>, we replaced the title of all webpages with the page’s URL. 
+
+Example:
+  <page> <title> Roblox – Home </title> <text> HTML BODY </text> </page>
+
+Is now:
+
+  <page> <title> https://www.roblox.com/home </title> <text> HTML BODY </text> </page>
+
+This is important in the next step of our implementation.
+
+2.	OutlinkMapperStage1.java, OutlinkReducerStage1.java via XMLInputFormat.java:
+
+The first task within the java program itself is to extract the data we need from input XML file and remove the red links from the large dataset. We implement the XMLInputFormat class to extract the valid data. Using XMLInputFormat we determine where a webpage begins and ends via the contents of every <page> ... </page>. 
+Once we implement our desired input format, the first out-like MapReduce task, OutlinkMapperStage1, extracts the title of the page which is present in the <title> ... </title> and all the contents of the page within the <text> ... </text> to find all the out-links from current title.  Remember that the content of <title> … </title> has been modified within our input to refer the page’s URL rather than the page’s title. 
+	
+	(See the example in implementation stage 1)
+	
+We use a regular expression to extract all the valid links from the text tag. In our case, there are two types of valid links, [[A]], and [[A|B]]. From both links A is extracted and all the spaces are replaced with the underscore. All the titles are emitted as a (key, value) pair in the format (title, #), where # is the index, so that for every title one pair will be created by the combiner. Instead of emitting (title, link) to reducer all the in-links of the page are emitted to reducer i.e. (link, title).
+
+Example:
+  (key, value) -> (title, #) -> (https://www.roblox.com/home, 1)
+  (key, value) -> (title, #) -> (https://blog.roblox.com/, 2)
+  …
+  (key, value) -> (title, #) -> (URL, N)
+Next, the reducer (OutlinkReducerStage1) puts all the contents of the bucket in the Set to keep only the unique links. As we emitted the index (#) in every title pair, if # is not present in the bucket then it is not a valid page. Now when the set has index (#) sent as a (title, #) which will go to its specific pair and all the other links are sent as single out-links.
+
+3.	OutlinkMapperStage2.java, OutlinkReducerStage2.java:
+
+The second out-link MapReduce stage implements the job of generating an out-link adjacency graph. Mapper (OutlinkMapperStage2) splits all the value entries of the (key, value) pair and emits it to the reducer. Since we removed duplicate pages when reducing the (key, value) pairs in the last stage, we no longer need the indices (#’s) of the links. Thus, we remove the index value from all the links. 
+All the values are then combined into StringBuilder and emitted as string output to generate the adjacency graph. This output will be stored in PageRank.outlink.out (which is an unranked version of our final ranked output file).
+
+4.	LinkCountMapper.java, LinkCountReducer.java:
+This part contains the MapReduce job which computes the total number of pages denoted as N in the equation (Displayed in Table 2 of our results section). Upon receiving the output from OutlinkReducerStage2 stored in PageRank.outlink.out, there are two wats to calculate N:
+1.	Look for all the page and title tags in the large dataset
+
+If we were to do this, we would have to sort through the initial input file and count the number of occurrences of <page> … </page>. Unfortunately, thing becomes increasingly taxing and timely of a method as the number of pages being ranked increases because of the additional content within each page adding to the file size and content that would have to be sorted. 
+
+This method is not optimized.
+
+2.	Instead of counting all the page tags in the large dataset count number of lines in the out-link graph which contains all the unique titles:
+
+By doing this, we would only have to count the number of unique titles. Since there are no duplicates, we do not have to sort through any unnecessary information. As the number of pages increase, the increase in size is minimal per the size of the additional pages’ titles. LinkCountReducer will then emit N=Number of pages in the dataset and write it to the PageRank.n.out
+
+This method is optimized. 
+We chose to implement the second method since it is optimized and therefore more efficient and faster, particularly as the data set increases in size.
+
+5.	RankCalculateMapperStage1.java, RankCalculateReducerStage1.java, RankCalculateMapper.java:
+
+This MapReduce job is required to calculate the PageRank for 8 iterations. To initialize the page ranks of all the pages, we introduce initial rank for all the pages to 1/N where N equals the number of unique pages (previously stored in PageRank.n.out). Upon initialization, the Reducer outputs the initial rank values to tmp/PageRank.iter0.out in the format <title> <initialized rank> <out-links>. We then proceed to implement page rank iterations for more precise rankings.
+
+During each of the 8 iterations we implement the following ranking process: 
+  1.	Split the (key, value) pairs into title, rank, and out-links.  
+  2.	Count all the out-links for each page title and calculate the rankVote of all each page’s out-links. We calculate rankVote using the equation:
+  rankVote = rank / outlinkCount
+  3.	Emit this vote to all the out-links of that page.
+  4.	In the Reducer, add all the rank votes from all the links corresponding to each page to count the page rank for each page using.
+
+During our ranking process, our algorithm uses the following formula:
+
+  PR(p1) = (1 - d)/N + (PR(p2)/L(p2) + PR(p3)/L(p3) + ... + (PR(pN)/L(pN)) 
+
+where...
+
+  d = damping factor
+  PR(p1) = page rank of page p1
+  N = total number of pages
+  L(p2) = total number of out-links on page p2
+
+Once we are done with the page rank calculation, emit the newly calculated page rank values in the format <title> <new rank> <out-links> to PageRank.n.out. Note that while the pages have ranked, the output does not emit in a sorted order.
+
+6.	SortMapper.java, SortReducer.java:
+
+After 8 iterations sorting is performed on iter1 and iter8 in this MapReduce job. Mapper of this part emits page rank as (key, value) pair (rank, page) in the sorted order. To emit the page ranks in the descending order we have overridden the compare() method in KeyComparator class.
+
+	The Reducer (SortReducer) now receives all the page ranks in descending order and compares if the page rank is greater than 5/N. If the rank is greater than the 5/N value then reducer emits the page rank as (page title, rank). If not, the page is ignored.
+
+As the MapReduce splits all the output in parts we merge the corresponding outputs in single files. We have created new file using FSDataOutputStream to store all the data from output parts to single file. By opening a handle for every file some chunk of bytes are transferred to output file using read() method of FSDataInputStream class. All the output files PageRank.outlink, PageRank.n.out, PageRank.iter1.out, PageRank.iter8.out are stored in the results directory.
